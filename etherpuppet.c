@@ -217,7 +217,7 @@ int main(int argc, char *argv[])
         sigaddset(&sa.sa_mask, SIGINT);
         sa.sa_flags = SA_SIGINFO | SA_ONESHOT | SA_RESTART;
 
-        while ((c = getopt(argc, argv, "ms:c:i:I:hdbCSM:v")) != -1) {
+        while ((c = getopt(argc, argv, "ms:c:i:I:hdBSMC:v")) != -1) {
                 switch (c) {
                 case 'v':
                         version();
@@ -226,7 +226,7 @@ int main(int argc, char *argv[])
                 case 'm':
                         MASTER=1;
                         break;
-                case 'b':
+                case 'B':
                         BPF = BPF_NONE;
                         break;
                 case 'S':
