@@ -52,6 +52,9 @@
 #define JMP_ERROR 2
 #define JMP_INTR 3
 
+#define CMD_CMD 0x8000
+#define CMD_IFHWADDR 0x0001
+
 
 #define SETBPF(x,y,val) do { the_BPF[(x)].k = (val); the_BPF[(y)].k = (val); } while(0)
 #define SETBPFIPSRC(val) SETBPF(14,25,htonl(val))
@@ -103,9 +106,6 @@ struct sock_fprog the_filter = {
         the_BPF,
 };
 
-
-
-
 void usage()
 {
         fprintf(stderr, "Usage: etherpuppet {-s port|-c targetip:port} [-b] -i iface\n"
@@ -140,10 +140,11 @@ int main(int argc, char *argv[])
 
 
         char c, *p, *ip;
-        char buf[MTU+4];
+        unsigned char buf[MTU+4];
         char *iface = NULL;
         fd_set readset;
-        char *ifname = "puppet%d";
+        char *ifname_opt = "puppet%d";
+        char ifname[IFNAMSIZ+1];
 
         int reuseaddr = 1;
 
@@ -187,7 +188,7 @@ int main(int argc, char *argv[])
                         iface = optarg;
                         break;
                 case 'I':
-                        ifname = optarg;
+                        ifname_opt = optarg;
                         break;
                 default:
                         usage();
@@ -238,10 +239,12 @@ int main(int argc, char *argv[])
 
                 memset(&ifr, 0, sizeof(ifr));
                 ifr.ifr_flags = IFF_TAP;
-                strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+                strncpy(ifr.ifr_name, ifname_opt, IFNAMSIZ);
                 if (ioctl(s2, TUNSETIFF, (void *)&ifr) < 0) PERROR("ioctl");
+                memset(ifname,0,IFNAMSIZ+1);
+                strncpy(ifname, ifr.ifr_name, IFNAMSIZ);
 
-                printf("Allocated interface %s. Configure and use it\n", ifr.ifr_name);
+                printf("Allocated interface %s. Configure and use it\n", ifname);
         }
         else { /* Packet socket on the puppet interface */
 
@@ -285,6 +288,14 @@ int main(int argc, char *argv[])
 
                 printf("Communication established!\n");
 
+                if (!MASTER) {
+                        unsigned short cmd = CMD_IFHWADDR | CMD_CMD;
+                        memset(&ifr, 0, sizeof(ifr));
+                        strncpy(ifr.ifr_name, iface, IFNAMSIZ);
+                        ioctl(s, SIOCGIFHWADDR, &ifr);
+                        send(s, &cmd, 2, 0);
+                        send(s, ifr.ifr_hwaddr.sa_data, 6, 0);
+                }
                 while (1) {
                         FD_ZERO(&readset);
                         FD_SET(s2, &readset);
@@ -301,8 +312,16 @@ int main(int argc, char *argv[])
                                 }
                                 n = *(short *)buf;
                                 if (DEBUG) printf("%i\n",n);
-                                if (n & 0x8000) { /* Command from the peer */
+                                if (n & CMD_CMD) { /* Command from the peer */
                                         switch (n & 0x7fff) {
+                                        case CMD_IFHWADDR:
+                                                recv(s, buf, 6, 0);
+                                                printf("Set %s mac address to %02x:%02x:%02x:%02x:%02x:%02x\n",ifname,buf[0],buf[1],buf[2],buf[3],buf[4],buf[5]);
+                                                memset(&ifr, 0, sizeof(ifr));
+                                                strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+                                                memcpy(ifr.ifr_hwaddr.sa_data, buf, 6);
+                                                ioctl(s, SIOCSIFHWADDR, &ifr);
+                                                break;
                                         default:
                                                 ERROR("unknown command\n");
                                         }
