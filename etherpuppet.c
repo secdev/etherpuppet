@@ -35,14 +35,22 @@
 #include <linux/if_ether.h>
 #include <linux/in.h>
 #include <linux/filter.h>
+#include <signal.h>
+#include <setjmp.h>
 
 #define MTU 1600
 
 #define PERROR(x) do { perror(x); exit(1); } while (0)
+#define PERROR2(x) do { perror(x); longjmp(env, JMP_ERROR); } while (0)
 #define ERROR(x, args ...) do { fprintf(stderr,"ERROR:" x, ## args); exit(1); } while (0)
 
 #define CLIENT 1
 #define SERVER 2
+
+#define JMP_NOJMP 0
+#define JMP_PEERCLOSED 1
+#define JMP_ERROR 2
+#define JMP_INTR 3
 
 
 #define SETBPF(x,y,val) do { the_BPF[(x)].k = (val); the_BPF[(y)].k = (val); } while(0)
@@ -112,24 +120,42 @@ void usage()
         exit(0);
 }
 
+jmp_buf env;
+
+void sa_term(int sig, siginfo_t *si, void *ctx)
+{
+        longjmp(env,JMP_INTR);
+}
+
+
 int main(int argc, char *argv[])
 {
         struct sockaddr_in sin, sin2;
         struct sockaddr_ll sll;
         struct ifreq ifr;
-        int fd, s, s2, sinlen, sin2len, port, PORT, l, ifidx, m, n;
+        int  s, s2, sinlen, sin2len, port, PORT, l, ifidx, m, n;
         short int h;
+
+        struct sigaction sa;
+
 
         char c, *p, *ip;
         char buf[MTU+4];
         char *iface = NULL;
-        fd_set fdset;
+        fd_set readset;
         char *ifname = "puppet%d";
+
+        int reuseaddr = 1;
 
         int MASTER = 0;
               int MODE = 0,  DEBUG = 0;
         int BPF = 1;
 
+        sa.sa_sigaction = &sa_term;
+        sigemptyset(&sa.sa_mask);
+        sigaddset(&sa.sa_mask, SIGTERM);
+        sigaddset(&sa.sa_mask, SIGINT);
+        sa.sa_flags = SA_SIGINFO | SA_ONESHOT | SA_RESTART;
 
         while ((c = getopt(argc, argv, "ms:c:i:I:hdb")) != -1) {
                 switch (c) {
@@ -173,23 +199,14 @@ int main(int argc, char *argv[])
         if (! (MODE && (MASTER || iface))) usage();
 
 
-        if (MASTER) {
-                /* Create virtual interface */
-                if ( (fd = open("/dev/net/tun",O_RDWR)) < 0) PERROR("open");
-
-                memset(&ifr, 0, sizeof(ifr));
-                ifr.ifr_flags = IFF_TAP;
-                strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
-                if (ioctl(fd, TUNSETIFF, (void *)&ifr) < 0) PERROR("ioctl");
-
-                printf("Allocated interface %s. Configure and use it\n", ifr.ifr_name);
-        }
 
         /* Socket for TCP connection between puppet and puppetmaster */
         s = socket(PF_INET, SOCK_STREAM, 0);  /* DGRAM could be better, but ssh only forward TCP */
         sin.sin_family = AF_INET;
         sin.sin_addr.s_addr = htonl(INADDR_ANY);
         sin.sin_port = htons(PORT);
+        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &reuseaddr, sizeof(reuseaddr));
+
         if ( bind(s,(struct sockaddr *)&sin, sizeof(sin)) < 0) PERROR("bind");
 
         if (MODE == CLIENT) {
@@ -205,6 +222,7 @@ int main(int argc, char *argv[])
                 sin2len = sizeof(sin2);
                 s2 = accept(s, (struct sockaddr *)&sin2, &sin2len);
                 if (s2 == -1) PERROR("accept");
+                close(s);
                 s = s2;
         }
 
@@ -215,7 +233,15 @@ int main(int argc, char *argv[])
 
 
         if (MASTER) {
-                s2 = fd;
+                /* Create virtual interface */
+                if ( (s2 = open("/dev/net/tun",O_RDWR)) < 0) PERROR("open");
+
+                memset(&ifr, 0, sizeof(ifr));
+                ifr.ifr_flags = IFF_TAP;
+                strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+                if (ioctl(s2, TUNSETIFF, (void *)&ifr) < 0) PERROR("ioctl");
+
+                printf("Allocated interface %s. Configure and use it\n", ifr.ifr_name);
         }
         else { /* Packet socket on the puppet interface */
 
@@ -231,7 +257,8 @@ int main(int argc, char *argv[])
                         SETBPFPORTSRC(sin.sin_port);
                         SETBPFPORTDST(sin2.sin_port);
                         if (setsockopt(s2, SOL_SOCKET, SO_ATTACH_FILTER, &the_filter, sizeof(the_filter))<0)
-                                perror("setsockopt");
+                                PERROR("setsockopt");
+                        printf("BPF installed\n");
                 }
 
 
@@ -249,48 +276,76 @@ int main(int argc, char *argv[])
 
         /* Now we can go */
 
-        while (1) {
-                FD_ZERO(&fdset);
-                FD_SET(s2, &fdset);
-                FD_SET(s, &fdset);
-                if (select(s+s2+1, &fdset, NULL, NULL, NULL) < 0) PERROR("select");
-                if (FD_ISSET(s, &fdset)) {
-                        if (DEBUG) write(1,">", 1);
-                        l = 0;                      /* BEEUUURK! */
-                        while (l < 2) {
-                                if ((m = read(s, buf+l, 2-l)) == -1) PERROR("read(1)");
-                                l += m;
-                        }
-                        n = *(short *)buf;
-                        if (DEBUG) printf("%i\n",n);
-                        if (n & 0x8000) { /* Command from the peer */
-                                switch (n & 0x7fff) {
-                                default:
-                                        ERROR("unknown command\n");
-                                }
-                        }
-                        else {  /* data */
-                                if (n > MTU) n = MTU;
-                                l = 0;
-                                while (l < n) {
-                                        if ((m = read(s, buf+4+l, n-l)) == -1) PERROR("read(2)");
+
+        switch (setjmp(env)) {
+        case JMP_NOJMP:
+
+                if (sigaction(SIGTERM, &sa, NULL) == -1) PERROR2("sigaction");
+                if (sigaction(SIGINT, &sa, NULL) == -1) PERROR2("sigaction");
+
+                printf("Communication established!\n");
+
+                while (1) {
+                        FD_ZERO(&readset);
+                        FD_SET(s2, &readset);
+                        FD_SET(s, &readset);
+                        if (select(s+s2+1, &readset, NULL, NULL,  NULL) < 0) PERROR2("select");
+
+                        if (FD_ISSET(s, &readset)) {
+                                if (DEBUG) write(1,">", 1);
+                                l = 0;                      /* BEEUUURK! */
+                                while (l < 2) {
+                                        if ((m = read(s, buf+l, 2-l)) == -1) PERROR2("read(1)");
+                                        if (m == 0) longjmp(env, JMP_PEERCLOSED);
                                         l += m;
                                 }
-                                if (MASTER)
-                                        *(short *)buf = *(short *)(buf+16);
-                                if (write(s2, MASTER ? buf : buf+4, MASTER ? n+4 : n) == -1) PERROR("write");
+                                n = *(short *)buf;
+                                if (DEBUG) printf("%i\n",n);
+                                if (n & 0x8000) { /* Command from the peer */
+                                        switch (n & 0x7fff) {
+                                        default:
+                                                ERROR("unknown command\n");
+                                        }
+                                }
+                                else {  /* data */
+                                        if (n > MTU) n = MTU;
+                                        l = 0;
+                                        while (l < n) {
+                                                if ((m = read(s, buf+4+l, n-l)) == -1) PERROR2("read(2)");
+                                                l += m;
+                                        }
+                                        if (MASTER)
+                                                *(short *)buf = *(short *)(buf+16);
+                                        if (write(s2, MASTER ? buf : buf+4, MASTER ? n+4 : n) == -1) PERROR2("write");
+                                }
+                        }
+                        if (FD_ISSET(s2, &readset)) {
+                                if (DEBUG) write(1,"<", 1);
+                                if ((l = read(s2, MASTER ? buf : buf+4, MTU)) == -1) PERROR2("read(0)");
+                                h = MASTER ? l-4 : l;
+
+                                if (DEBUG) printf("%i\n",h);
+                                if (send(s, (void *)&h, 2, 0) == -1) PERROR2("send(1)");
+                                if (send(s, buf+4, h, 0) == -1) PERROR2("send(2)");
                         }
                 }
-                else {
-                        if (DEBUG) write(1,"<", 1);
-                        if ((l = read(s2, MASTER ? buf : buf+4, MTU)) == -1) PERROR("read(0)");
-                        h = MASTER ? l-4 : l;
-
-                        if (DEBUG) printf("%i\n",h);
-                        if (send(s, (void *)&h, 2, 0) == -1) PERROR("send(1)");
-                        if (send(s, buf+4, h, 0) == -1) PERROR("send(2)");
-                }
+        case JMP_ERROR:
+                printf("Catched error\n");
+                break;
+        case JMP_INTR:
+                printf("Catched TERM/INT signal\n");
+                break;
+        case JMP_PEERCLOSED:
+                printf("Connection reset by peer\n");
+                break;
+        default:
+                printf("Something weird happend...\n");
         }
+
+        printf("Gracefull exit\n");
+        shutdown(s,SHUT_RDWR);
+        close(s);
+        close(s2);
 }
 
 
