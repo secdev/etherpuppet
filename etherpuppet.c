@@ -41,7 +41,7 @@
 #include <linux/filter.h>
 
 
-#define VERSION "v0.1.1-devel"
+#define VERSION "v0.2"
 
 #define MTU 1600
 
@@ -150,16 +150,17 @@ struct sock_fprog the_filter = {
 
 void usage()
 {
-        fprintf(stderr, "Usage: etherpuppet {-s port|-c targetip:port} [-b|-S] -i iface\n"
+        fprintf(stderr, "Usage: etherpuppet {-s port|-c targetip:port} [-B|-S|-M <arg>] [-C] -i iface\n"
                         "       etherpuppet -m {-s port|-c targetip:port} [-I ifname]\n"
-                        " -s <port>      : listen on TCP port <port>\n"
-                        " -c <IP>:<port> : connect to <IP>:<port>\n"
-                        " -i <iface>     : vampirize interface <iface>\n"
-                        " -I <ifname>    : choose the name of the virtual interface\n"
-                        " -m             : master mode\n"
-                        " -b             : do not use any BPF. Etherpuppet may see its own traffic!\n"
-                        " -S             : build BPF filter with SSH_CONNECTION environment variable\n"
-                        " -C             : don't copy real interface parameters to virtual interface\n");
+                        "-s <port>        : listen on TCP port <port>\n"
+                        "-c <IP>:<port>   : connect to <IP>:<port>\n"
+                        "-i <iface>       : vampirize interface <iface>\n"
+                        "-I <ifname>      : choose the name of the virtual interface\n"
+                        "-m               : master mode\n"
+                        "-B               : do not use any BPF. Etherpuppet may see its own traffic!\n"
+                        "-S               : build BPF filter with SSH_CONNECTION environment variable\n"
+                        "-M src:sp,dst:dp : BPF filter manual configuration\n"
+                        "-C               : don't copy real interface parameters to virtual interface\n");
         exit(0);
 }
 
@@ -195,7 +196,7 @@ int main(int argc, char *argv[])
         struct sigaction sa;
 
 
-        char c, *p, *ip;
+        char c, *p, *ip, *manual_bpf_arg;
         unsigned char buf[MTU+4];
         char *iface = NULL;
         fd_set readset;
@@ -216,7 +217,7 @@ int main(int argc, char *argv[])
         sigaddset(&sa.sa_mask, SIGINT);
         sa.sa_flags = SA_SIGINFO | SA_ONESHOT | SA_RESTART;
 
-        while ((c = getopt(argc, argv, "ms:c:i:I:hdbCSv")) != -1) {
+        while ((c = getopt(argc, argv, "ms:c:i:I:hdbCSM:v")) != -1) {
                 switch (c) {
                 case 'v':
                         version();
@@ -231,7 +232,10 @@ int main(int argc, char *argv[])
                 case 'S':
                         BPF = BPF_SSH;
                         break;
-
+                case 'M':
+                        BPF = BPF_MANUAL;
+                        manual_bpf_arg = optarg;
+                        break;
                 case 'd':
                         DEBUG++;
                         break;
@@ -356,14 +360,42 @@ int main(int argc, char *argv[])
                                 cnx = p+1;
                                 SETBPFPORTDST(atoi(cnx));
 
-                                goto parse_ok;
+                                goto parse_ok1;
                         } while(0);
-
                         ERROR("can't parse SSH_CONNECTION environment variable!\n");
-
-                parse_ok:
+                parse_ok1:
                         break;
 
+                case BPF_MANUAL:
+                        do {
+                                struct in_addr ip;
+                                int port;
+                                char *p,*cnx;
+
+                                cnx = strdup(manual_bpf_arg);
+
+                                if (! (p = index(cnx, ':')) ) break;
+                                *p=0;
+                                if (!inet_aton(cnx, &ip)) break;
+                                SETBPFIPSRC(ntohl(ip.s_addr));
+                                cnx = p+1;
+                                if (! (p = index(cnx, ',')) ) break;
+                                *p=0;
+                                SETBPFPORTSRC(atoi(cnx));
+                                cnx = p+1;
+                                if (! (p = index(cnx, ':')) ) break;
+                                *p=0;
+                                if (!inet_aton(cnx, &ip)) break;
+                                SETBPFIPDST(ntohl(ip.s_addr));
+                                cnx = p+1;
+                                SETBPFPORTDST(atoi(cnx));
+
+                                goto parse_ok2;
+                        } while(0);
+                        ERROR("can't parse -M argument [%s] !\n", manual_bpf_arg);
+                parse_ok2:
+                        free(cnx);
+                        break;
 
                 }
 
