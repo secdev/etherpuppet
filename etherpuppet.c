@@ -62,12 +62,6 @@
 #define SETBPFPORTSRC(val) SETBPF(12,23,htons(val))
 #define SETBPFPORTDST(val) SETBPF(10,21,htons(val))
 
-/* Optimized version of:
- * not (tcp and
- *      ( (dst 68.69.70.71 and dst port 0xABCD and src port 0x1234 and src 64.65.66.67) or
- *        (src 68.69.70.71 and src port 0xABCD and dst port 0x1234 and dst 64.65.66.67))
- */
-
 int ifclone_get_ioctl[] = {
         SIOCGIFHWADDR,
 //        SIOCGIFMETRIC,
@@ -82,6 +76,13 @@ int ifclone_set_ioctl[] = {
         SIOCSIFDSTADDR,
         SIOCSIFBRDADDR,
         SIOCSIFNETMASK };
+
+
+/* Optimized version of:
+ * not (tcp and
+ *      ( (dst 68.69.70.71 and dst port 0xABCD and src port 0x1234 and src 64.65.66.67) or
+ *        (src 68.69.70.71 and src port 0xABCD and dst port 0x1234 and dst 64.65.66.67))
+ */
 
 struct sock_filter the_BPF[]= {
 
