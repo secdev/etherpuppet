@@ -276,25 +276,15 @@ int main(int argc, char *argv[])
                                         if ((m = read(s, buf+4+l, n-l)) == -1) PERROR("read(2)");
                                         l += m;
                                 }
-                                if (MASTER) {
+                                if (MASTER)
                                         *(short *)buf = *(short *)(buf+16);
-                                        if (write(s2, buf, n+4) == -1) PERROR("write");
-                                }
-                                else {
-                                        if (send(s2, buf+4, n, 0) < 0) PERROR("send");
-                                }
+                                if (write(s2, MASTER ? buf : buf+4, MASTER ? n+4 : n) == -1) PERROR("write");
                         }
                 }
                 else {
                         if (DEBUG) write(1,"<", 1);
-                        if (MASTER) {
-                                l = read(s2, buf, sizeof(buf));
-                                h = l-4;
-                        }
-                        else {
-                                l = recv(s2, buf+4, sizeof(buf),0 );
-                                h = l;
-                        }
+                        if ((l = read(s2, MASTER ? buf : buf+4, MTU)) == -1) PERROR("read(0)");
+                        h = MASTER ? l-4 : l;
 
                         if (DEBUG) printf("%i\n",h);
                         if (send(s, (void *)&h, 2, 0) == -1) PERROR("send(1)");
