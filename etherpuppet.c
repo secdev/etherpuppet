@@ -53,7 +53,7 @@
 #define JMP_INTR 3
 
 #define CMD_CMD 0x8000
-#define CMD_IFHWADDR 0x0001
+#define CMD_IFREQ 0x0001
 
 
 #define SETBPF(x,y,val) do { the_BPF[(x)].k = (val); the_BPF[(y)].k = (val); } while(0)
@@ -67,6 +67,21 @@
  *      ( (dst 68.69.70.71 and dst port 0xABCD and src port 0x1234 and src 64.65.66.67) or
  *        (src 68.69.70.71 and src port 0xABCD and dst port 0x1234 and dst 64.65.66.67))
  */
+
+int ifclone_get_ioctl[] = {
+        SIOCGIFHWADDR,
+//        SIOCGIFMETRIC,
+        SIOCGIFADDR,
+        SIOCGIFDSTADDR,
+        SIOCGIFBRDADDR,
+        SIOCGIFNETMASK };
+int ifclone_set_ioctl[] = {
+        SIOCSIFHWADDR,
+//        SIOCSIFMETRIC,
+        SIOCSIFADDR,
+        SIOCSIFDSTADDR,
+        SIOCSIFBRDADDR,
+        SIOCSIFNETMASK };
 
 struct sock_filter the_BPF[]= {
 
@@ -116,6 +131,7 @@ void usage()
                         " -I <ifname>    : choose the name of the virtual interface\n"
                         " -m             : master mode\n"
                         " -b             : do not use any BPF. Etherpuppet may see its own traffic!\n"
+                        " -C             : do not configure virtual interface with real interface parameters\n"
 );
         exit(0);
 }
@@ -147,10 +163,11 @@ int main(int argc, char *argv[])
         char ifname[IFNAMSIZ+1];
 
         int reuseaddr = 1;
+        int req;
 
         int MASTER = 0;
               int MODE = 0,  DEBUG = 0;
-        int BPF = 1;
+        int BPF = 1, CONFIG = 1;
 
         sa.sa_sigaction = &sa_term;
         sigemptyset(&sa.sa_mask);
@@ -158,7 +175,7 @@ int main(int argc, char *argv[])
         sigaddset(&sa.sa_mask, SIGINT);
         sa.sa_flags = SA_SIGINFO | SA_ONESHOT | SA_RESTART;
 
-        while ((c = getopt(argc, argv, "ms:c:i:I:hdb")) != -1) {
+        while ((c = getopt(argc, argv, "ms:c:i:I:hdbC")) != -1) {
                 switch (c) {
                 case 'h':
                         usage();
@@ -170,6 +187,9 @@ int main(int argc, char *argv[])
                         break;
                 case 'd':
                         DEBUG++;
+                        break;
+                case 'C':
+                        CONFIG = 0;
                         break;
                 case 's':
                         MODE = SERVER;
@@ -244,7 +264,7 @@ int main(int argc, char *argv[])
                 memset(ifname,0,IFNAMSIZ+1);
                 strncpy(ifname, ifr.ifr_name, IFNAMSIZ);
 
-                printf("Allocated interface %s. Configure and use it\n", ifname);
+                printf("Allocated interface is [%s]\n", ifname);
         }
         else { /* Packet socket on the puppet interface */
 
@@ -289,12 +309,23 @@ int main(int argc, char *argv[])
                 printf("Communication established!\n");
 
                 if (!MASTER) {
-                        unsigned short cmd = CMD_IFHWADDR | CMD_CMD;
-                        memset(&ifr, 0, sizeof(ifr));
-                        strncpy(ifr.ifr_name, iface, IFNAMSIZ);
-                        ioctl(s, SIOCGIFHWADDR, &ifr);
-                        send(s, &cmd, 2, 0);
-                        send(s, ifr.ifr_hwaddr.sa_data, 6, 0);
+                        int ireq;
+                        unsigned short cmd;
+
+
+                        /* Send interface parameters */
+                        cmd = CMD_CMD | CMD_IFREQ;
+                        for(ireq = 0; ireq < sizeof(ifclone_get_ioctl)/sizeof(int); ireq++) {
+                                memset(&ifr, 0, sizeof(ifr));
+                                strncpy(ifr.ifr_name, iface, IFNAMSIZ);
+                                req = ifclone_set_ioctl[ireq];
+                                ioctl(s, ifclone_get_ioctl[ireq], &ifr);
+                                send(s, &cmd, 2, 0);
+                                send(s, &req, 4, 0);
+                                if (req != SIOCSIFHWADDR)
+                                        ifr.ifr_addr.sa_family = AF_INET;
+                                send(s, (void *)&ifr, sizeof(struct ifreq), 0);
+                        }
                 }
                 while (1) {
                         FD_ZERO(&readset);
@@ -314,13 +345,16 @@ int main(int argc, char *argv[])
                                 if (DEBUG) printf("%i\n",n);
                                 if (n & CMD_CMD) { /* Command from the peer */
                                         switch (n & 0x7fff) {
-                                        case CMD_IFHWADDR:
-                                                recv(s, buf, 6, 0);
-                                                printf("Set %s mac address to %02x:%02x:%02x:%02x:%02x:%02x\n",ifname,buf[0],buf[1],buf[2],buf[3],buf[4],buf[5]);
-                                                memset(&ifr, 0, sizeof(ifr));
-                                                strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
-                                                memcpy(ifr.ifr_hwaddr.sa_data, buf, 6);
-                                                ioctl(s, SIOCSIFHWADDR, &ifr);
+                                        case CMD_IFREQ:
+                                                recv(s, &req, 4, 0);
+                                                recv(s, &ifr, sizeof(struct ifreq), 0);
+                                                if (CONFIG) {
+                                                        strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+                                                        if (ioctl(s, req, &ifr) == -1)
+                                                                PERROR2("ioctl");
+                                                }
+                                                printf("Configure request [%04x] %s\n",
+                                                       req, CONFIG ? "applied" : "ignored");
                                                 break;
                                         default:
                                                 ERROR("unknown command\n");
