@@ -45,32 +45,49 @@
 #define SERVER 2
 
 
-#define SETBPF(x,val) do { the_BPF[(x)].k = (val); } while(0)
-#define SETBPFIPSRC(val) SETBPF(14,htonl(val))
-#define SETBPFIPDST(val) SETBPF(5,htonl(val))
-#define SETBPFPORTSRC(val) SETBPF(12,htons(val))
-#define SETBPFPORTDST(val) SETBPF(10,htons(val))
+#define SETBPF(x,y,val) do { the_BPF[(x)].k = (val); the_BPF[(y)].k = (val); } while(0)
+#define SETBPFIPSRC(val) SETBPF(14,25,htonl(val))
+#define SETBPFIPDST(val) SETBPF(5,16,htonl(val))
+#define SETBPFPORTSRC(val) SETBPF(12,23,htons(val))
+#define SETBPFPORTDST(val) SETBPF(10,21,htons(val))
 
-/* not (tcp and dst 68.69.70.71 and dst port 0xABCD and src port 0x1234 and src 64.65.66.67) */
+/* Optimized version of:
+ * not (tcp and
+ *      ( (dst 68.69.70.71 and dst port 0xABCD and src port 0x1234 and src 64.65.66.67) or
+ *        (src 68.69.70.71 and src port 0xABCD and dst port 0x1234 and dst 64.65.66.67))
+ */
 
 struct sock_filter the_BPF[]= {
+
         { 0x28,  0,  0, 0x0000000c }, // 00: ldh  [12]
-        { 0x15,  0, 14, 0x00000800 }, // 01: jeq  #0x800       jt 2    jf 16
+        { 0x15,  0, 14, 0x00000800 }, // 01: jeq  #0x800       jt 2    jf 27
         { 0x30,  0,  0, 0x00000017 }, // 02: ldb  [23]
-        { 0x15,  0, 12, 0x00000006 }, // 03: jeq  #0x6         jt 4    jf 16
+        { 0x15,  0, 11, 0x00000006 }, // 03: jeq  #0x6         jt 4    jf 15
         { 0x20,  0,  0, 0x0000001e }, // 04: ld   [30]
-        { 0x15,  0, 10, 0x44454647 }, // 05: jeq  #0x44454647  jt 6    jf 16  // dst IP
+        { 0x15,  0,  9, 0x44454647 }, // 05: jeq  #0x44454647  jt 6    jf 15  // dst IP
         { 0x28,  0,  0, 0x00000014 }, // 06: ldh  [20]
-        { 0x45,  8,  0, 0x00001fff }, // 07: jset #0x1fff      jt 16   jf 8
+        { 0x45,  7,  0, 0x00001fff }, // 07: jset #0x1fff      jt 15   jf 8
         { 0xb1,  0,  0, 0x0000000e }, // 08: ldxb 4*([14]&0xf)
         { 0x48,  0,  0, 0x00000010 }, // 19: ldh  [x + 16]
-        { 0x15,  0,  5, 0x0000abcd }, // 10: jeq  #0xabcd      jt 11   jf 16  // dst port
+        { 0x15,  0,  4, 0x0000abcd }, // 10: jeq  #0xabcd      jt 11   jf 15  // dst port
         { 0x48,  0,  0, 0x0000000e }, // 11: ldh  [x + 14]
-        { 0x15,  0,  3, 0x00001234 }, // 12: jeq  #0x1234      jt 13   jf 16  // src port
+        { 0x15,  0,  2, 0x00001234 }, // 12: jeq  #0x1234      jt 13   jf 15  // src port
         { 0x20,  0,  0, 0x0000001a }, // 13: ld   [26]
-        { 0x15,  0,  1, 0x40414243 }, // 14: jeq  #0x40414243  jt 15   jf 16  // src IP
-        { 0x6,   0,  0, 0x00000000 }, // 15: ret  #0
-        { 0x6,   0,  0, MTU        }, // 16: ret  #MTU
+        { 0x15, 11,  0, 0x40414243 }, // 14: jeq  #0x40414243  jt 26   jf 15  // src IP
+
+        { 0x20,  0,  0, 0x0000001a }, // 15: ld   [26]
+        { 0x15,  0, 10, 0x44454647 }, // 16: jeq  #0x44454647  jt 17   jf 27  // dst IP
+        { 0x28,  0,  0, 0x00000014 }, // 17: ldh  [20]
+        { 0x45,  8,  0, 0x00001fff }, // 18: jset #0x1fff      jt 27   jf 19
+        { 0xb1,  0,  0, 0x0000000e }, // 19: ldxb 4*([14]&0xf)
+        { 0x48,  0,  0, 0x0000000e }, // 20: ldh  [x + 14]
+        { 0x15,  0,  5, 0x0000abcd }, // 21: jeq  #0xabcd      jt 22   jf 27  // dst port
+        { 0x48,  0,  0, 0x00000010 }, // 22: ldh  [x + 16]
+        { 0x15,  0,  3, 0x00001234 }, // 23: jeq  #0x1234      jt 24   jf 27  // src port
+        { 0x20,  0,  0, 0x0000001e }, // 24: ld   [30]
+        { 0x15,  0,  1, 0x40414243 }, // 25: jeq  #0x40414243  jt 26   jf 27  // src IP
+        { 0x6,   0,  0, 0x00000000 }, // 26: ret  #0
+        { 0x6,   0,  0, MTU        }, // 27: ret  #MTU
 };
 
 struct sock_fprog the_filter = {
