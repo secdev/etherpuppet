@@ -389,12 +389,12 @@ int main(int argc, char *argv[])
                                 SETBPFIPDST(ntohl(ip.s_addr));
                                 cnx = p+1;
                                 SETBPFPORTDST(atoi(cnx));
+                                free(cnx);
 
                                 goto parse_ok2;
                         } while(0);
                         ERROR("can't parse -M argument [%s] !\n", manual_bpf_arg);
                 parse_ok2:
-                        free(cnx);
                         break;
 
                 }
