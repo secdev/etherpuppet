@@ -37,6 +37,8 @@
 #include <signal.h>
 #include <setjmp.h>
 
+#define VERSION "v0.1.1-devel"
+
 #define MTU 1600
 
 #define PERROR(x) do { perror(x); exit(1); } while (0)
@@ -139,6 +141,15 @@ void usage()
         exit(0);
 }
 
+void version()
+{
+        fprintf(stderr,
+                "EtherPuppet %s\n"
+                "(c) 2004 Philippe Biondi <phil@secdev.org>\n"
+                "More informations: http://www.secdev.org/projects/etherpuppet\n", VERSION);
+        exit(0);
+}
+
 jmp_buf env;
 
 void sa_term(int sig, siginfo_t *si, void *ctx)
@@ -178,8 +189,10 @@ int main(int argc, char *argv[])
         sigaddset(&sa.sa_mask, SIGINT);
         sa.sa_flags = SA_SIGINFO | SA_ONESHOT | SA_RESTART;
 
-        while ((c = getopt(argc, argv, "ms:c:i:I:hdbC")) != -1) {
+        while ((c = getopt(argc, argv, "ms:c:i:I:hdbCv")) != -1) {
                 switch (c) {
+                case 'v':
+                        version();
                 case 'h':
                         usage();
                 case 'm':
