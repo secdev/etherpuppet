@@ -136,8 +136,7 @@ void usage()
                         " -I <ifname>    : choose the name of the virtual interface\n"
                         " -m             : master mode\n"
                         " -b             : do not use any BPF. Etherpuppet may see its own traffic!\n"
-                        " -C             : do not configure virtual interface with real interface parameters\n"
-);
+                        " -C             : do not configure virtual interface with real interface parameters\n");
         exit(0);
 }
 
