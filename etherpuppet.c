@@ -121,7 +121,7 @@ int main(int argc, char *argv[])
         short int h;
 
         char c, *p, *ip;
-        char buf[1600];
+        char buf[MTU+4];
         char *iface = NULL;
         fd_set fdset;
         char *ifname = "puppet%d";
@@ -270,6 +270,7 @@ int main(int argc, char *argv[])
                                 }
                         }
                         else {  /* data */
+                                if (n > MTU) n = MTU;
                                 l = 0;
                                 while (l < n) {
                                         if ((m = read(s, buf+4+l, n-l)) == -1) PERROR("read(2)");
