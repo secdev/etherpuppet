@@ -42,6 +42,7 @@
 
 #define PERROR(x) do { perror(x); exit(1); } while (0)
 #define PERROR2(x) do { perror(x); longjmp(env, JMP_ERROR); } while (0)
+#define PERROR3(x) do { perror("(trying to continue) " x); } while (0)
 #define ERROR(x, args ...) do { fprintf(stderr,"ERROR:" x, ## args); exit(1); } while (0)
 
 #define CLIENT 1
@@ -65,6 +66,7 @@
 int ifclone_get_ioctl[] = {
         SIOCGIFHWADDR,
 //        SIOCGIFMETRIC,
+        SIOCGIFMTU,
         SIOCGIFADDR,
         SIOCGIFDSTADDR,
         SIOCGIFBRDADDR,
@@ -72,6 +74,7 @@ int ifclone_get_ioctl[] = {
 int ifclone_set_ioctl[] = {
         SIOCSIFHWADDR,
 //        SIOCSIFMETRIC,
+        SIOCSIFMTU,
         SIOCSIFADDR,
         SIOCSIFDSTADDR,
         SIOCSIFBRDADDR,
@@ -323,7 +326,7 @@ int main(int argc, char *argv[])
                                 ioctl(s, ifclone_get_ioctl[ireq], &ifr);
                                 send(s, &cmd, 2, 0);
                                 send(s, &req, 4, 0);
-                                if (req != SIOCSIFHWADDR)
+                                if ((req != SIOCSIFHWADDR) && (req != SIOCSIFMTU))
                                         ifr.ifr_addr.sa_family = AF_INET;
                                 send(s, (void *)&ifr, sizeof(struct ifreq), 0);
                         }
@@ -370,12 +373,16 @@ int main(int argc, char *argv[])
                                         }
                                         if (MASTER)
                                                 *(short *)buf = *(short *)(buf+16);
-                                        if (write(s2, MASTER ? buf : buf+4, MASTER ? n+4 : n) == -1) PERROR2("write");
+                                        if (write(s2, MASTER ? buf : buf+4, MASTER ? n+4 : n) == -1)
+                                                PERROR3("write");
                                 }
                         }
                         if (FD_ISSET(s2, &readset)) {
                                 if (DEBUG) write(1,"<", 1);
-                                if ((l = read(s2, MASTER ? buf : buf+4, MTU)) == -1) PERROR2("read(0)");
+                                if ((l = read(s2, MASTER ? buf : buf+4, MTU)) == -1) {
+                                        PERROR3("read(0)");
+                                        continue;
+                                }
                                 h = MASTER ? l-4 : l;
 
                                 if (DEBUG) printf("%i\n",h);
