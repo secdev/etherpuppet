@@ -48,7 +48,7 @@
 #define PERROR(x) do { perror(x); exit(1); } while (0)
 #define PERROR2(x) do { perror(x); longjmp(env, JMP_ERROR); } while (0)
 #define PERROR3(x) do { perror("(trying to continue) " x); } while (0)
-#define ERROR(x, args ...) do { fprintf(stderr,"ERROR: " x, ## args); exit(1); } while (0)
+#define ERROR(x, args...) do { fprintf(stderr,"ERROR: " x, ## args); exit(1); } while (0)
 
 #define CLIENT 1
 #define SERVER 2
