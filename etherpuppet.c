@@ -36,6 +36,8 @@
 #include <linux/in.h>
 #include <linux/filter.h>
 
+#define MTU 1600
+
 #define PERROR(x) do { perror(x); exit(1); } while (0)
 #define ERROR(x, args ...) do { fprintf(stderr,"ERROR:" x, ## args); exit(1); } while (0)
 
@@ -43,46 +45,40 @@
 #define SERVER 2
 
 
-struct sock_filter BPF_code[]= {
-        { 0x28, 0, 0, 0x0000000c },
-        { 0x15, 0, 30, 0x00000800 },
-        { 0x20, 0, 0, 0x0000001a },
-        { 0x15, 2, 0, 0x42424242 },
-        { 0x20, 0, 0, 0x0000001e },
-        { 0x15, 0, 26, 0x42424242 },
-        { 0x30, 0, 0, 0x00000017 },
-        { 0x15, 2, 0, 0x00000084 },
-        { 0x15, 1, 0, 0x00000006 },
-        { 0x15, 0, 22, 0x00000011 },
-        { 0x28, 0, 0, 0x00000014 },
-        { 0x45, 20, 0, 0x00001fff },
-        { 0xb1, 0, 0, 0x0000000e },
-        { 0x48, 0, 0, 0x0000000e },
-        { 0x15, 2, 0, 0x11111111 },
-        { 0x48, 0, 0, 0x00000010 },
-        { 0x15, 0, 15, 0x11111111 },
-        { 0x20, 0, 0, 0x0000001a },
-        { 0x15, 2, 0, 0x41414141 },
-        { 0x20, 0, 0, 0x0000001e },
-        { 0x15, 0, 11, 0x41414141 },
-        { 0x30, 0, 0, 0x00000017 },
-        { 0x15, 2, 0, 0x00000084 },
-        { 0x15, 1, 0, 0x00000006 },
-        { 0x15, 0, 7, 0x00000011 },
-        { 0x28, 0, 0, 0x00000014 },
-        { 0x45, 5, 0, 0x00001fff },
-        { 0x48, 0, 0, 0x0000000e },
-        { 0x15, 2, 0, 0x22222222 },
-        { 0x48, 0, 0, 0x00000010 },
-        { 0x15, 0, 1, 0x22222222 },
-        { 0x6, 0, 0, 0x00000060 },
-        { 0x6, 0, 0, 0x00000000 },
+#define SETBPF(x,val) do { the_BPF[(x)].k = (val); } while(0)
+#define SETBPFIPSRC(val) SETBPF(14,htonl(val))
+#define SETBPFIPDST(val) SETBPF(5,htonl(val))
+#define SETBPFPORTSRC(val) SETBPF(12,htons(val))
+#define SETBPFPORTDST(val) SETBPF(10,htons(val))
+
+/* not (tcp and dst 68.69.70.71 and dst port 0xABCD and src port 0x1234 and src 64.65.66.67) */
+
+struct sock_filter the_BPF[]= {
+        { 0x28,  0,  0, 0x0000000c }, // 00: ldh  [12]
+        { 0x15,  0, 14, 0x00000800 }, // 01: jeq  #0x800       jt 2    jf 16
+        { 0x30,  0,  0, 0x00000017 }, // 02: ldb  [23]
+        { 0x15,  0, 12, 0x00000006 }, // 03: jeq  #0x6         jt 4    jf 16
+        { 0x20,  0,  0, 0x0000001e }, // 04: ld   [30]
+        { 0x15,  0, 10, 0x44454647 }, // 05: jeq  #0x44454647  jt 6    jf 16  // dst IP
+        { 0x28,  0,  0, 0x00000014 }, // 06: ldh  [20]
+        { 0x45,  8,  0, 0x00001fff }, // 07: jset #0x1fff      jt 16   jf 8
+        { 0xb1,  0,  0, 0x0000000e }, // 08: ldxb 4*([14]&0xf)
+        { 0x48,  0,  0, 0x00000010 }, // 19: ldh  [x + 16]
+        { 0x15,  0,  5, 0x0000abcd }, // 10: jeq  #0xabcd      jt 11   jf 16  // dst port
+        { 0x48,  0,  0, 0x0000000e }, // 11: ldh  [x + 14]
+        { 0x15,  0,  3, 0x00001234 }, // 12: jeq  #0x1234      jt 13   jf 16  // src port
+        { 0x20,  0,  0, 0x0000001a }, // 13: ld   [26]
+        { 0x15,  0,  1, 0x40414243 }, // 14: jeq  #0x40414243  jt 15   jf 16  // src IP
+        { 0x6,   0,  0, 0x00000000 }, // 15: ret  #0
+        { 0x6,   0,  0, MTU        }, // 16: ret  #MTU
 };
 
-struct sock_fprog Filter = {
-        sizeof(BPF_code)/sizeof(struct sock_filter),
-        BPF_code,
+struct sock_fprog the_filter = {
+        sizeof(the_BPF)/sizeof(the_BPF[0]),
+        the_BPF,
 };
+
+
 
 
 void usage()
@@ -97,7 +93,7 @@ int main(int argc, char *argv[])
         struct sockaddr_in sin, sin2;
         struct sockaddr_ll sll;
         struct ifreq ifr;
-        int fd, s, s2, sin2len, port, PORT, l, ifidx, m, n;
+        int fd, s, s2, sinlen, sin2len, port, PORT, l, ifidx, m, n;
         short int h;
 
         char c, *p, *ip;
@@ -169,10 +165,10 @@ int main(int argc, char *argv[])
         if ( bind(s,(struct sockaddr *)&sin, sizeof(sin)) < 0) PERROR("bind");
 
         if (MODE == CLIENT) {
-                printf("Connecting to %s:%i...\n", inet_ntoa(sin2.sin_addr.s_addr), ntohs(sin2.sin_port));
                 sin2.sin_family = AF_INET;
                 sin2.sin_port = htons(port);
                 inet_aton(ip, &sin2.sin_addr);
+                printf("Connecting to %s:%i...\n", inet_ntoa(sin2.sin_addr.s_addr), ntohs(sin2.sin_port));
                 if (connect(s, (struct sockaddr *)&sin2, sizeof(sin2)) == -1) PERROR("connect");
         }
         else {
@@ -183,16 +179,29 @@ int main(int argc, char *argv[])
                 if (s2 == -1) PERROR("accept");
                 s = s2;
         }
+
+        sinlen = sizeof(sin);
+        getsockname(s, (struct sockaddr *)&sin, &sinlen);
         printf("Connected to %s:%i\n",inet_ntoa(sin2.sin_addr.s_addr), ntohs(sin2.sin_port));
+        printf("Connected from %s:%i\n",inet_ntoa(sin.sin_addr.s_addr), ntohs(sin.sin_port));
 
 
         if (MASTER) {
                 s2 = fd;
         }
-        else {  /* XXX push a bpf filter to avoid sniffing our own packets */
-                /* Packet socket on the puppet interface */
+        else { /* Packet socket on the puppet interface */
+
+                SETBPFIPSRC(sin.sin_addr.s_addr);
+                SETBPFIPDST(sin2.sin_addr.s_addr);
+                SETBPFPORTSRC(sin.sin_port);
+                SETBPFPORTDST(sin2.sin_port);
+
                 s2 = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
                 if (s2 == -1) PERROR("socket");
+
+                if (setsockopt(s2, SOL_SOCKET, SO_ATTACH_FILTER, &the_filter, sizeof(the_filter))<0)
+                        perror("setsockopt");
+
 
                      strncpy(ifr.ifr_name, iface, IF_NAMESIZE);
                 if (ioctl(s2, SIOCGIFINDEX, &ifr) == -1) PERROR("ioctl");
