@@ -17,13 +17,15 @@
 
 /* $Id$ */
 
+
 #include <stdio.h>
 #include <unistd.h>
+#include <asm/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-//#include <netinet/in.h>
+#include <netinet/in.h>
 #include <string.h>
 #include <net/if.h>
 #include <linux/if_tun.h>
@@ -31,11 +33,12 @@
 #include <sys/ioctl.h>
 #include <netpacket/packet.h>
 #include <net/if_arp.h>
-#include <linux/if_ether.h>
-#include <linux/in.h>
-#include <linux/filter.h>
+#include <linux/if_ether.h>  /* for ETH_P_ALL */
 #include <signal.h>
 #include <setjmp.h>
+#include <netdb.h>
+#include <linux/filter.h>
+
 
 #define VERSION "v0.1.1-devel"
 
@@ -44,7 +47,7 @@
 #define PERROR(x) do { perror(x); exit(1); } while (0)
 #define PERROR2(x) do { perror(x); longjmp(env, JMP_ERROR); } while (0)
 #define PERROR3(x) do { perror("(trying to continue) " x); } while (0)
-#define ERROR(x, args ...) do { fprintf(stderr,"ERROR:" x, ## args); exit(1); } while (0)
+#define ERROR(x, args ...) do { fprintf(stderr,"ERROR: " x, ## args); exit(1); } while (0)
 
 #define CLIENT 1
 #define SERVER 2
@@ -164,6 +167,7 @@ int main(int argc, char *argv[])
         struct ifreq ifr;
         int  s, s2, sinlen, sin2len, port, PORT, l, ifidx, m, n;
         short int h;
+        struct hostent *host;
 
         struct sigaction sa;
 
@@ -248,7 +252,9 @@ int main(int argc, char *argv[])
         if (MODE == CLIENT) {
                 sin2.sin_family = AF_INET;
                 sin2.sin_port = htons(port);
-                inet_aton(ip, &sin2.sin_addr);
+                host = gethostbyname(ip);
+                if (!host) ERROR("can't resolve [%s]\n",ip);
+                sin2.sin_addr = *(struct in_addr *)host->h_addr;
                 printf("Connecting to %s:%i...\n", inet_ntoa(sin2.sin_addr.s_addr), ntohs(sin2.sin_port));
                 if (connect(s, (struct sockaddr *)&sin2, sizeof(sin2)) == -1) PERROR("connect");
         }
