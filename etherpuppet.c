@@ -100,8 +100,15 @@ struct sock_fprog the_filter = {
 
 void usage()
 {
-        fprintf(stderr, "Usage: etherpuppet {-s port|-c targetip:port} -i iface\n"
-                        "       etherpuppet -m {-s port|-c targetip:port} [-I ifname]\n");
+        fprintf(stderr, "Usage: etherpuppet {-s port|-c targetip:port} [-b] -i iface\n"
+                        "       etherpuppet -m {-s port|-c targetip:port} [-I ifname]\n"
+                        " -s <port>      : listen on TCP port <port>\n"
+                        " -c <IP>:<port> : connect to <IP>:<port>\n"
+                        " -i <iface>     : vampirize interface <iface>\n"
+                        " -I <ifname>    : choose the name of the virtual interface\n"
+                        " -m             : master mode\n"
+                        " -b             : do not use any BPF. Etherpuppet may see its own traffic!\n"
+);
         exit(0);
 }
 
@@ -121,14 +128,18 @@ int main(int argc, char *argv[])
 
         int MASTER = 0;
               int MODE = 0,  DEBUG = 0;
+        int BPF = 1;
 
 
-        while ((c = getopt(argc, argv, "ms:c:i:I:hd")) != -1) {
+        while ((c = getopt(argc, argv, "ms:c:i:I:hdb")) != -1) {
                 switch (c) {
                 case 'h':
                         usage();
                 case 'm':
                         MASTER=1;
+                        break;
+                case 'b':
+                        BPF=0;
                         break;
                 case 'd':
                         DEBUG++;
@@ -199,8 +210,8 @@ int main(int argc, char *argv[])
 
         sinlen = sizeof(sin);
         getsockname(s, (struct sockaddr *)&sin, &sinlen);
-        printf("Connected to %s:%i\n",inet_ntoa(sin2.sin_addr.s_addr), ntohs(sin2.sin_port));
-        printf("Connected from %s:%i\n",inet_ntoa(sin.sin_addr.s_addr), ntohs(sin.sin_port));
+        printf("I am %s:%i\n",inet_ntoa(sin.sin_addr.s_addr), ntohs(sin.sin_port));
+        printf("Peer is %s:%i\n",inet_ntoa(sin2.sin_addr.s_addr), ntohs(sin2.sin_port));
 
 
         if (MASTER) {
@@ -208,16 +219,20 @@ int main(int argc, char *argv[])
         }
         else { /* Packet socket on the puppet interface */
 
-                SETBPFIPSRC(sin.sin_addr.s_addr);
-                SETBPFIPDST(sin2.sin_addr.s_addr);
-                SETBPFPORTSRC(sin.sin_port);
-                SETBPFPORTDST(sin2.sin_port);
 
                 s2 = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
                 if (s2 == -1) PERROR("socket");
 
-                if (setsockopt(s2, SOL_SOCKET, SO_ATTACH_FILTER, &the_filter, sizeof(the_filter))<0)
-                        perror("setsockopt");
+
+
+                if (BPF) {
+                        SETBPFIPSRC(sin.sin_addr.s_addr);
+                        SETBPFIPDST(sin2.sin_addr.s_addr);
+                        SETBPFPORTSRC(sin.sin_port);
+                        SETBPFPORTDST(sin2.sin_port);
+                        if (setsockopt(s2, SOL_SOCKET, SO_ATTACH_FILTER, &the_filter, sizeof(the_filter))<0)
+                                perror("setsockopt");
+                }
 
 
                      strncpy(ifr.ifr_name, iface, IF_NAMESIZE);
