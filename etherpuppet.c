@@ -1,7 +1,6 @@
 /*
- * etherpuppet.c --- (PoC) schizophrenize an interface for it to obey to
-                     its master (etherpuppetmaster)
- *  more informations at http://www.secdev.org/projects/etherpuppet.html
+ * etherpuppet.c --- (PoC) schizophrenize an interface for it to obey to its master
+ *  more informations at http://www.secdev.org/projects/etherpuppet
  *
  * Copyright (C) 2004  Philippe Biondi <phil@secdev.org>
  *
