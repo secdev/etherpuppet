@@ -19,6 +19,7 @@
 
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <asm/types.h>
 #include <sys/stat.h>
@@ -62,10 +63,21 @@
 
 
 #define SETBPF(x,y,val) do { the_BPF[(x)].k = (val); the_BPF[(y)].k = (val); } while(0)
-#define SETBPFIPSRC(val) SETBPF(14,25,htonl(val))
-#define SETBPFIPDST(val) SETBPF(5,16,htonl(val))
-#define SETBPFPORTSRC(val) SETBPF(12,23,htons(val))
-#define SETBPFPORTDST(val) SETBPF(10,21,htons(val))
+#define SETBPFIPSRC(val) SETBPF(14,25,val)
+#define SETBPFIPDST(val) SETBPF(5,16,val)
+#define SETBPFPORTSRC(val) SETBPF(12,23,val)
+#define SETBPFPORTDST(val) SETBPF(10,21,val)
+
+#define GETBPF(x) (the_BPF[(x)].k)
+#define GETBPFIPSRC GETBPF(14)
+#define GETBPFIPDST GETBPF(5)
+#define GETBPFPORTSRC GETBPF(12)
+#define GETBPFPORTDST GETBPF(10)
+
+#define QUAD(x) (((x) >> 24)&0xff),(((x) >> 16)&0xff),(((x) >> 8)&0xff),((x)&0xff)
+
+
+#define DESCRIBE_BPF "%i.%i.%i.%i:%i <-> %i.%i.%i.%i:%i\n", QUAD(GETBPFIPSRC),GETBPFPORTSRC,QUAD(GETBPFIPDST),GETBPFPORTDST
 
 int ifclone_get_ioctl[] = {
         SIOCGIFHWADDR,
@@ -84,6 +96,13 @@ int ifclone_set_ioctl[] = {
         SIOCSIFBRDADDR,
         SIOCSIFNETMASK };
 
+
+enum {
+        BPF_NONE,
+        BPF_AUTO,
+        BPF_SSH,
+        BPF_MANUAL
+};
 
 /* Optimized version of:
  * not (tcp and
@@ -131,7 +150,7 @@ struct sock_fprog the_filter = {
 
 void usage()
 {
-        fprintf(stderr, "Usage: etherpuppet {-s port|-c targetip:port} [-b] -i iface\n"
+        fprintf(stderr, "Usage: etherpuppet {-s port|-c targetip:port} [-b|-S] -i iface\n"
                         "       etherpuppet -m {-s port|-c targetip:port} [-I ifname]\n"
                         " -s <port>      : listen on TCP port <port>\n"
                         " -c <IP>:<port> : connect to <IP>:<port>\n"
@@ -139,7 +158,8 @@ void usage()
                         " -I <ifname>    : choose the name of the virtual interface\n"
                         " -m             : master mode\n"
                         " -b             : do not use any BPF. Etherpuppet may see its own traffic!\n"
-                        " -C             : do not configure virtual interface with real interface parameters\n");
+                        " -S             : build BPF filter with SSH_CONNECTION environment variable\n"
+                        " -C             : don't copy real interface parameters to virtual interface\n");
         exit(0);
 }
 
@@ -151,6 +171,9 @@ void version()
                 "More informations: http://www.secdev.org/projects/etherpuppet\n", VERSION);
         exit(0);
 }
+
+
+
 
 jmp_buf env;
 
@@ -182,9 +205,10 @@ int main(int argc, char *argv[])
         int reuseaddr = 1;
         int req;
 
-        int MASTER = 0;
+        int MASTER = 0, CONFIG = 1;
               int MODE = 0,  DEBUG = 0;
-        int BPF = 1, CONFIG = 1;
+
+        int BPF = BPF_AUTO;
 
         sa.sa_sigaction = &sa_term;
         sigemptyset(&sa.sa_mask);
@@ -192,7 +216,7 @@ int main(int argc, char *argv[])
         sigaddset(&sa.sa_mask, SIGINT);
         sa.sa_flags = SA_SIGINFO | SA_ONESHOT | SA_RESTART;
 
-        while ((c = getopt(argc, argv, "ms:c:i:I:hdbCv")) != -1) {
+        while ((c = getopt(argc, argv, "ms:c:i:I:hdbCSv")) != -1) {
                 switch (c) {
                 case 'v':
                         version();
@@ -202,8 +226,12 @@ int main(int argc, char *argv[])
                         MASTER=1;
                         break;
                 case 'b':
-                        BPF=0;
+                        BPF = BPF_NONE;
                         break;
+                case 'S':
+                        BPF = BPF_SSH;
+                        break;
+
                 case 'd':
                         DEBUG++;
                         break;
@@ -294,16 +322,52 @@ int main(int argc, char *argv[])
                 if (s2 == -1) PERROR("socket");
 
 
-
-                if (BPF) {
-                        SETBPFIPSRC(sin.sin_addr.s_addr);
-                        SETBPFIPDST(sin2.sin_addr.s_addr);
-                        SETBPFPORTSRC(sin.sin_port);
-                        SETBPFPORTDST(sin2.sin_port);
+                switch(BPF) {
+                case BPF_AUTO:
+                        SETBPFIPSRC(ntohl(sin.sin_addr.s_addr));
+                        SETBPFIPDST(ntohl(sin2.sin_addr.s_addr));
+                        SETBPFPORTSRC(ntohs(sin.sin_port));
+                        SETBPFPORTDST(ntohs(sin2.sin_port));
                         if (setsockopt(s2, SOL_SOCKET, SO_ATTACH_FILTER, &the_filter, sizeof(the_filter))<0)
                                 PERROR("setsockopt");
-                        printf("BPF installed\n");
+                        break;
+                case BPF_SSH:
+                        do {
+                                struct in_addr ip;
+                                int port;
+                                char *p,*cnx;
+
+                                cnx = getenv("SSH_CONNECTION");
+                                if (!cnx) ERROR("can't find SSH_CONNECTION environment variable. Is it the right session ?\n");
+
+                                if (! (p = index(cnx, ' ')) ) break;
+                                *p=0;
+                                if (!inet_aton(cnx, &ip)) break;
+                                SETBPFIPSRC(ntohl(ip.s_addr));
+                                cnx = p+1;
+                                if (! (p = index(cnx, ' ')) ) break;
+                                *p=0;
+                                SETBPFPORTSRC(atoi(cnx));
+                                cnx = p+1;
+                                if (! (p = index(cnx, ' ')) ) break;
+                                *p=0;
+                                if (!inet_aton(cnx, &ip)) break;
+                                SETBPFIPDST(ntohl(ip.s_addr));
+                                cnx = p+1;
+                                SETBPFPORTDST(atoi(cnx));
+
+                                goto parse_ok;
+                        } while(0);
+
+                        ERROR("can't parse SSH_CONNECTION environment variable!\n");
+
+                parse_ok:
+                        break;
+
+
                 }
+
+                if (BPF != BPF_NONE) printf("BPF filters out " DESCRIBE_BPF);
 
 
                      strncpy(ifr.ifr_name, iface, IF_NAMESIZE);
