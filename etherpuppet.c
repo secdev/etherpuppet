@@ -43,6 +43,8 @@
 
 #define VERSION "v0.2"
 
+#define PROTOVERSION 0x13370103
+
 #define MTU 1600
 
 #define PERROR(x) do { perror(x); exit(1); } while (0)
@@ -148,6 +150,29 @@ struct sock_fprog the_filter = {
         the_BPF,
 };
 
+int sane(unsigned char x)
+{
+        return ((x >= 0x20) && (x < 0x80));
+}
+
+int hexdump(void *buf, int len)
+{
+        unsigned char *b = buf;
+        int i,j;
+
+        for (i=0; i < (len+15)/16*16; i++) {
+                if (i < len) printf("%02x ",b[i]); else printf("   ");
+                if (i%8 == 7) printf(" ");
+                if (i%16 == 15) {
+                        for (j=i-15; (j < i) && (j < len); j++)
+                                printf("%c", sane(b[j]) ? b[j] : '.');
+                        printf("\n");
+                }
+        }
+}
+
+
+
 void usage()
 {
         fprintf(stderr, "Usage: etherpuppet {-s port|-c targetip:port} [-B|-S|-M <arg>] [-C] -i iface\n"
@@ -160,7 +185,8 @@ void usage()
                         "-B               : do not use any BPF. Etherpuppet may see its own traffic!\n"
                         "-S               : build BPF filter with SSH_CONNECTION environment variable\n"
                         "-M src:sp,dst:dp : BPF filter manual configuration\n"
-                        "-C               : don't copy real interface parameters to virtual interface\n");
+                        "-C               : don't copy real interface parameters to virtual interface\n"
+                        "-d               : increase debug level (can be used more than once" );
         exit(0);
 }
 
@@ -189,8 +215,9 @@ int main(int argc, char *argv[])
         struct sockaddr_in sin, sin2;
         struct sockaddr_ll sll;
         struct ifreq ifr;
-        int  s, s2, sinlen, sin2len, port, PORT, l, ifidx, m, n;
+        int  s, s2, sinlen, sin2len, sll_len, port, PORT, l, ifidx, m, n, v;
         short int h;
+        short sll_hatype;
         struct hostent *host;
 
         struct sigaction sa;
@@ -208,6 +235,7 @@ int main(int argc, char *argv[])
 
         int MASTER = 0, CONFIG = 1;
               int MODE = 0,  DEBUG = 0;
+        int PPP = 0;
 
         int BPF = BPF_AUTO;
 
@@ -217,7 +245,7 @@ int main(int argc, char *argv[])
         sigaddset(&sa.sa_mask, SIGINT);
         sa.sa_flags = SA_SIGINFO | SA_ONESHOT | SA_RESTART;
 
-        while ((c = getopt(argc, argv, "ms:c:i:I:hdBSMC:v")) != -1) {
+        while ((c = getopt(argc, argv, "ms:c:i:I:hdBSMCv")) != -1) {
                 switch (c) {
                 case 'v':
                         version();
@@ -289,6 +317,8 @@ int main(int argc, char *argv[])
                 sin2.sin_addr = *(struct in_addr *)host->h_addr;
                 printf("Connecting to %s:%i...\n", inet_ntoa(sin2.sin_addr.s_addr), ntohs(sin2.sin_port));
                 if (connect(s, (struct sockaddr *)&sin2, sizeof(sin2)) == -1) PERROR("connect");
+                v = PROTOVERSION;
+                if (send(s, &v, sizeof(l), 0) == -1) PERROR("send PROTOVERSION");
         }
         else {
                 printf("Waiting for connection on port %i...\n", PORT);
@@ -298,6 +328,17 @@ int main(int argc, char *argv[])
                 if (s2 == -1) PERROR("accept");
                 close(s);
                 s = s2;
+                if (recv(s, &v, sizeof(l), 0) == -1) PERROR("recv PROTOVERSION");
+                if (v != PROTOVERSION)
+                        ERROR("Protocol version mismatch local=%08x (%i.%i) remote=%08x (%i.%i)\n",
+                              PROTOVERSION, (PROTOVERSION >> 8) & 0xff, PROTOVERSION & 0xff,
+                               v, (v>>8)&0xff, v&0xff);
+                else
+                        printf("Protocol version ok. local=%08x (%i.%i) remote=%08x (%i.%i)\n",
+                              PROTOVERSION, (PROTOVERSION >> 8) & 0xff, PROTOVERSION & 0xff,
+                              v, (v>>8)&0xff, v&0xff);
+
+
         }
 
         sinlen = sizeof(sin);
@@ -310,10 +351,29 @@ int main(int argc, char *argv[])
                 /* Create virtual interface */
                 if ( (s2 = open("/dev/net/tun",O_RDWR)) < 0) PERROR("open");
 
+                l = recv(s, &sll_hatype, sizeof(sll_hatype),0);
+                if (l == -1) PERROR("recv linktype");
+                sll_hatype = ntohs(sll_hatype);
+
+                switch (sll_hatype) {
+                case 1:
+                        printf("Remote linktype is %i (Ethernet)\n", sll_hatype);
+                        break;
+                case 512:
+                        printf("Remote linktype is %i (PPP)\n", sll_hatype);
+                        PPP = 1;
+                        break;
+                default:
+                        printf("Remote linktype %i is unknown. Using Ethernet.\n", sll_hatype);
+                }
+
                 memset(&ifr, 0, sizeof(ifr));
-                ifr.ifr_flags = IFF_TAP;
+                if (PPP)
+                        ifr.ifr_flags = IFF_TUN;
+                else
+                        ifr.ifr_flags = IFF_TAP;
                 strncpy(ifr.ifr_name, ifname_opt, IFNAMSIZ);
-                if (ioctl(s2, TUNSETIFF, (void *)&ifr) < 0) PERROR("ioctl");
+                if (ioctl(s2, TUNSETIFF, (void *)&ifr) < 0) PERROR("ioctl TUNSETIFF");
                 memset(ifname,0,IFNAMSIZ+1);
                 strncpy(ifname, ifr.ifr_name, IFNAMSIZ);
 
@@ -403,7 +463,7 @@ int main(int argc, char *argv[])
 
 
                      strncpy(ifr.ifr_name, iface, IF_NAMESIZE);
-                if (ioctl(s2, SIOCGIFINDEX, &ifr) == -1) PERROR("ioctl");
+                if (ioctl(s2, SIOCGIFINDEX, &ifr) == -1) PERROR("ioctl SIOCGIFINDEX");
                 ifidx = ifr.ifr_ifindex;
 
                 sll.sll_family = AF_PACKET;
@@ -411,6 +471,17 @@ int main(int argc, char *argv[])
                 sll.sll_ifindex = ifidx;
 
                 if (bind(s2, (struct sockaddr *)&sll, sizeof(sll)) == -1) PERROR("bind");
+
+                sll_len = sizeof(sll);
+                if (getsockname(s2, (struct sockaddr *)&sll, &sll_len) == -1) PERROR("getsockname");
+                printf("Sending remote linktype: %i\n", sll.sll_hatype);
+                if (sll.sll_hatype == 512) {
+                        printf("PPP mode\n");
+                        PPP = 1;
+                }
+
+                sll_hatype = htons(sll.sll_hatype);
+                send(s, &sll_hatype, sizeof(sll_hatype),0);
         }
 
 
@@ -431,12 +502,13 @@ int main(int argc, char *argv[])
 
 
                         /* Send interface parameters */
-                        cmd = CMD_CMD | CMD_IFREQ;
+                        cmd = htons(CMD_CMD | CMD_IFREQ);
                         for(ireq = 0; ireq < sizeof(ifclone_get_ioctl)/sizeof(int); ireq++) {
                                 memset(&ifr, 0, sizeof(ifr));
                                 strncpy(ifr.ifr_name, iface, IFNAMSIZ);
                                 req = ifclone_set_ioctl[ireq];
-                                ioctl(s, ifclone_get_ioctl[ireq], &ifr);
+                                if (ioctl(s, ifclone_get_ioctl[ireq], &ifr) == -1)
+                                        PERROR2("ioctl get");
                                 send(s, &cmd, 2, 0);
                                 send(s, &req, 4, 0);
                                 if ((req != SIOCSIFHWADDR) && (req != SIOCSIFMTU))
@@ -454,12 +526,13 @@ int main(int argc, char *argv[])
                                 if (DEBUG) write(1,">", 1);
                                 l = 0;                      /* BEEUUURK! */
                                 while (l < 2) {
-                                        if ((m = read(s, buf+l, 2-l)) == -1) PERROR2("read(1)");
+                                        if ((m = read(s, buf+l, 2-l)) == -1) PERROR2("read length");
                                         if (m == 0) longjmp(env, JMP_PEERCLOSED);
                                         l += m;
                                 }
-                                n = *(short *)buf;
-                                if (DEBUG) printf("%i\n",n);
+                                n = ntohs(*(short *)buf);
+                                if (DEBUG >= 2) printf("Received a %i %s\n", n&0x7fff,
+                                                       n&0x8000 ? "command":"byte packet");
                                 if (n & CMD_CMD) { /* Command from the peer */
                                         switch (n & 0x7fff) {
                                         case CMD_IFREQ:
@@ -468,7 +541,7 @@ int main(int argc, char *argv[])
                                                 if (CONFIG) {
                                                         strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
                                                         if (ioctl(s, req, &ifr) == -1)
-                                                                PERROR2("ioctl");
+                                                                PERROR3("ioctl set");
                                                 }
                                                 printf("Configure request [%04x] %s\n",
                                                        req, CONFIG ? "applied" : "ignored");
@@ -478,29 +551,51 @@ int main(int argc, char *argv[])
                                         }
                                 }
                                 else {  /* data */
-                                        if (n > MTU) n = MTU;
+                                        if (n > MTU) {
+                                                printf("WARNING: truncated packet (%i > %i) .  This should not happen\n", n, MTU);
+                                                n = MTU;
+                                        }
                                         l = 0;
                                         while (l < n) {
-                                                if ((m = read(s, buf+4+l, n-l)) == -1) PERROR2("read(2)");
+                                                if ((m = read(s, buf+2+l, n-l)) == -1) PERROR2("read packet data");
                                                 l += m;
                                         }
-                                        if (MASTER)
-                                                *(short *)buf = *(short *)(buf+16);
-                                        if (write(s2, MASTER ? buf : buf+4, MASTER ? n+4 : n) == -1)
-                                                PERROR3("write");
+                                        if (DEBUG >= 5) hexdump(buf+2, l);
+                                        if (MASTER) {
+                                                if (DEBUG >= 3) printf("Protocol = %04x\n",ntohs(*(short *)(buf+2)));
+                                                if (write(s2, buf , n+2) == -1)
+                                                        PERROR3("write");
+                                        }
+                                        else {
+                                                bzero(&sll, sizeof(sll));
+                                                sll.sll_family = AF_PACKET;
+                                                sll.sll_protocol = *(short *)(buf+2); /* htons(ntohs()) = Id */
+                                                if (DEBUG >= 3) printf("Protocol = %04x\n",ntohs(sll.sll_protocol));
+                                                sll.sll_ifindex = ifidx;
+                                                if (sendto(s2, buf+4, n+2, 0, (struct sockaddr *)&sll, sizeof(sll)) == -1) PERROR2("sendto");
+                                        }
                                 }
                         }
                         if (FD_ISSET(s2, &readset)) {
                                 if (DEBUG) write(1,"<", 1);
-                                if ((l = read(s2, MASTER ? buf : buf+4, MTU)) == -1) {
-                                        PERROR3("read(0)");
-                                        continue;
+                                if (MASTER) {
+                                        l = read(s2, buf, MTU);
+                                        if (l == -1) PERROR3("read");
+                                        l -= 2;
                                 }
-                                h = MASTER ? l-4 : l;
+                                else {
+                                        sll_len = sizeof(sll);
+                                        l = recvfrom(s2, buf+4, MTU, 0, (struct sockaddr *)&sll, &sll_len);
+                                        *(short *)(buf+2) = sll.sll_protocol; /* htons(ntohs()) = Id */
+                                        if (DEBUG > 4) printf("Protocol = %04x\n", ntohs(sll.sll_protocol));
+                                        if (l == -1) PERROR3("recvfrom");
+                                        l += 2;
+                                }
+                                *(short *)buf = htons(l);
 
-                                if (DEBUG) printf("%i\n",h);
-                                if (send(s, (void *)&h, 2, 0) == -1) PERROR2("send(1)");
-                                if (send(s, buf+4, h, 0) == -1) PERROR2("send(2)");
+                                if (send(s, buf, l+2, 0) == -1) PERROR2("send");
+                                if (DEBUG >= 3) printf("Sending %i bytes:\n", l);
+                                if (DEBUG >= 5) hexdump(buf+2, l);
                         }
                 }
         case JMP_ERROR:
