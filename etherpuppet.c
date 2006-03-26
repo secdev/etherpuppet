@@ -496,7 +496,7 @@ int main(int argc, char *argv[])
 
                 printf("Communication established!\n");
 
-                if (!MASTER) {
+                if (!MASTER && CONFIG) {
                         int ireq;
                         unsigned short cmd;
 
