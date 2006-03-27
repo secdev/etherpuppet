@@ -317,7 +317,7 @@ int main(int argc, char *argv[])
                 sin2.sin_addr = *(struct in_addr *)host->h_addr;
                 printf("Connecting to %s:%i...\n", inet_ntoa(sin2.sin_addr.s_addr), ntohs(sin2.sin_port));
                 if (connect(s, (struct sockaddr *)&sin2, sizeof(sin2)) == -1) PERROR("connect");
-                v = PROTOVERSION;
+                v = htonl(PROTOVERSION);
                 if (send(s, &v, sizeof(l), 0) == -1) PERROR("send PROTOVERSION");
         }
         else {
@@ -329,6 +329,7 @@ int main(int argc, char *argv[])
                 close(s);
                 s = s2;
                 if (recv(s, &v, sizeof(l), 0) == -1) PERROR("recv PROTOVERSION");
+                v = ntohl(PROTOVERSION);
                 if (v != PROTOVERSION)
                         ERROR("Protocol version mismatch local=%08x (%i.%i) remote=%08x (%i.%i)\n",
                               PROTOVERSION, (PROTOVERSION >> 8) & 0xff, PROTOVERSION & 0xff,
