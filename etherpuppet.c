@@ -609,7 +609,7 @@ int main(int argc, char *argv[])
                 printf("Connection reset by peer\n");
                 break;
         default:
-                printf("Something weird happend...\n");
+                printf("Something weird happened...\n");
         }
 
         printf("Gracefull exit\n");
