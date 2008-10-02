@@ -39,6 +39,10 @@
 #include <setjmp.h>
 #include <netdb.h>
 #include <linux/filter.h>
+#include <arpa/inet.h>
+#include <strings.h>
+
+
 
 
 #define VERSION "v0.2"
@@ -155,7 +159,7 @@ int sane(unsigned char x)
         return ((x >= 0x20) && (x < 0x80));
 }
 
-int hexdump(void *buf, int len)
+void hexdump(void *buf, int len)
 {
         unsigned char *b = buf;
         int i,j;
@@ -215,8 +219,8 @@ int main(int argc, char *argv[])
         struct sockaddr_in sin, sin2;
         struct sockaddr_ll sll;
         struct ifreq ifr;
-        int  s, s2, sinlen, sin2len, sll_len, port, PORT, l, ifidx, m, n, v;
-        short int h;
+        int  s, s2, port, PORT, l, ifidx, m, n, v;
+        socklen_t sinlen, sin2len, sll_len;
         short sll_hatype;
         struct hostent *host;
 
@@ -399,7 +403,6 @@ int main(int argc, char *argv[])
                 case BPF_SSH:
                         do {
                                 struct in_addr ip;
-                                int port;
                                 char *p,*cnx;
 
                                 cnx = getenv("SSH_CONNECTION");
@@ -430,7 +433,6 @@ int main(int argc, char *argv[])
                 case BPF_MANUAL:
                         do {
                                 struct in_addr ip;
-                                int port;
                                 char *p,*cnx;
 
                                 cnx = strdup(manual_bpf_arg);
@@ -616,6 +618,7 @@ int main(int argc, char *argv[])
         shutdown(s,SHUT_RDWR);
         close(s);
         close(s2);
+        return 0;
 }
 
 
