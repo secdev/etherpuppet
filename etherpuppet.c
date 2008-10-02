@@ -190,7 +190,7 @@ void usage()
                         "-S               : build BPF filter with SSH_CONNECTION environment variable\n"
                         "-M src:sp,dst:dp : BPF filter manual configuration\n"
                         "-C               : don't copy real interface parameters to virtual interface\n"
-                        "-d               : increase debug level (can be used more than once" );
+                        "-d               : increase debug level (can be used more than once)\n" );
         exit(0);
 }
 
