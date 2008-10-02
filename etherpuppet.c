@@ -315,7 +315,7 @@ int main(int argc, char *argv[])
                 host = gethostbyname(ip);
                 if (!host) ERROR("can't resolve [%s]\n",ip);
                 sin2.sin_addr = *(struct in_addr *)host->h_addr;
-                printf("Connecting to %s:%i...\n", inet_ntoa(sin2.sin_addr.s_addr), ntohs(sin2.sin_port));
+                printf("Connecting to %s:%i...\n", inet_ntoa(sin2.sin_addr), ntohs(sin2.sin_port));
                 if (connect(s, (struct sockaddr *)&sin2, sizeof(sin2)) == -1) PERROR("connect");
                 v = htonl(PROTOVERSION);
                 if (send(s, &v, sizeof(l), 0) == -1) PERROR("send PROTOVERSION");
@@ -344,8 +344,8 @@ int main(int argc, char *argv[])
 
         sinlen = sizeof(sin);
         getsockname(s, (struct sockaddr *)&sin, &sinlen);
-        printf("I am %s:%i\n",inet_ntoa(sin.sin_addr.s_addr), ntohs(sin.sin_port));
-        printf("Peer is %s:%i\n",inet_ntoa(sin2.sin_addr.s_addr), ntohs(sin2.sin_port));
+        printf("I am %s:%i\n",inet_ntoa(sin.sin_addr), ntohs(sin.sin_port));
+        printf("Peer is %s:%i\n",inet_ntoa(sin2.sin_addr), ntohs(sin2.sin_port));
 
 
         if (MASTER) {
