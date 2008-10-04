@@ -333,7 +333,7 @@ int main(int argc, char *argv[])
                 close(s);
                 s = s2;
                 if (recv(s, &v, sizeof(l), 0) == -1) PERROR("recv PROTOVERSION");
-                v = ntohl(PROTOVERSION);
+                v = ntohl(v);
                 if (v != PROTOVERSION)
                         ERROR("Protocol version mismatch local=%08x (%i.%i) remote=%08x (%i.%i)\n",
                               PROTOVERSION, (PROTOVERSION >> 8) & 0xff, PROTOVERSION & 0xff,
