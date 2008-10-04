@@ -45,7 +45,7 @@
 
 
 
-#define VERSION "v0.2"
+#define VERSION "v0.3"
 
 #define PROTOVERSION 0x13370103
 
