@@ -30,7 +30,7 @@
 #include <string.h>
 #include <net/if.h>
 #include <linux/if_tun.h>
-//#include <getopt.h>
+#include <getopt.h>
 #include <sys/ioctl.h>
 #include <netpacket/packet.h>
 #include <net/if_arp.h>
@@ -227,7 +227,8 @@ int main(int argc, char *argv[])
         struct sigaction sa;
 
 
-        signed char c, *p, *ip, *manual_bpf_arg;
+        int c;
+        char *p, *ip, *manual_bpf_arg;
         unsigned char buf[MTU+4];
         char *iface = NULL;
         fd_set readset;
