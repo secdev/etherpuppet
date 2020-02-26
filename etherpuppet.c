@@ -233,6 +233,7 @@ void usage()
                         "-M src:sp,dst:dp : BPF filter manual configuration\n"
                         "-C               : don't copy real interface parameters to virtual interface\n"
                         "-u               : set interface up when parameters have been copied\n"
+                        "-U <shell cmd>   : run <shell cmd> when interface has been configured\n"
                         "-d               : increase debug level (can be used more than once)\n" );
         exit(0);
 }
@@ -289,6 +290,7 @@ int main(int argc, char *argv[])
         int UP_IFACE = 0;
 
         int BPF = BPF_AUTO;
+        char *UP_SCRIPT = NULL;
 
         sa.sa_sigaction = &sa_term;
         sigemptyset(&sa.sa_mask);
@@ -296,7 +298,7 @@ int main(int argc, char *argv[])
         sigaddset(&sa.sa_mask, SIGINT);
         sa.sa_flags = SA_SIGINFO | SA_ONESHOT | SA_RESTART;
 
-        while ((c = getopt(argc, argv, "ms:c:i:I:hdBSMCvu")) != -1) {
+        while ((c = getopt(argc, argv, "ms:c:i:I:hdBSMCvuU:")) != -1) {
                 switch (c) {
                 case 'v':
                         version();
@@ -342,6 +344,9 @@ int main(int argc, char *argv[])
                         break;
                 case 'u':
                         UP_IFACE = 1;
+                        break;
+                case 'U':
+                        UP_SCRIPT = optarg;
                         break;
                 default:
                         usage();
@@ -614,6 +619,8 @@ int main(int argc, char *argv[])
                                                         if (ioctl(s, SIOCSIFFLAGS, &ifr) == -1)
                                                                 PERROR3("ioctl set flags");
                                                 }
+                                                if (UP_SCRIPT)
+                                                        system(UP_SCRIPT);
                                                 break;
                                         default:
                                                 ERROR("unknown command\n");
