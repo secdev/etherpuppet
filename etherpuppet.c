@@ -151,6 +151,48 @@ struct sock_fprog the_filter = {
         the_BPF,
 };
 
+
+
+#define NETIFNAMSIZ 16
+struct netifreq {
+        char name[NETIFNAMSIZ];
+        union {
+                struct netsockaddr {
+                        uint16_t family;
+                        char data[14];
+                } addr;
+                uint32_t mtu;
+        } ifru;
+};
+
+
+void hton_ifreq(int req, struct ifreq *ifr, struct netifreq *nifr)
+{
+        bzero(nifr->name, NETIFNAMSIZ);
+        memcpy(nifr->name, ifr->ifr_ifrn.ifrn_name, NETIFNAMSIZ < IFNAMSIZ ? NETIFNAMSIZ : IFNAMSIZ);
+        if ((req == SIOCGIFMTU) || (req == SIOCGIFMTU)) {
+                nifr->ifru.mtu = htonl(ifr->ifr_ifru.ifru_mtu);
+        }
+        else {
+                nifr->ifru.addr.family = htons(ifr->ifr_ifru.ifru_addr.sa_family);
+                memcpy(nifr->ifru.addr.data, ifr->ifr_ifru.ifru_addr.sa_data, 14);
+        }
+}
+
+void ntoh_ifreq(int req, struct netifreq *nifr, struct ifreq *ifr)
+{
+        bzero(ifr->ifr_ifrn.ifrn_name, IFNAMSIZ);
+        memcpy(ifr->ifr_ifrn.ifrn_name, nifr->name, NETIFNAMSIZ < IFNAMSIZ ? NETIFNAMSIZ : IFNAMSIZ);
+        if ((req == SIOCGIFMTU) || (req == SIOCGIFMTU)) {
+                ifr->ifr_ifru.ifru_mtu = ntohl(nifr->ifru.mtu);
+        }
+        else {
+                ifr->ifr_ifru.ifru_addr.sa_family = ntohs(nifr->ifru.addr.family);
+                memcpy(ifr->ifr_ifru.ifru_addr.sa_data, nifr->ifru.addr.data, 14);
+        }
+}
+
+
 int sane(unsigned char x)
 {
         return ((x >= 0x20) && (x < 0x80));
@@ -216,6 +258,8 @@ int main(int argc, char *argv[])
         struct sockaddr_in sin, sin2;
         struct sockaddr_ll sll;
         struct ifreq ifr;
+        struct netifreq nifr;
+        int netreq;
         int  s, s2, port, PORT, l, ifidx, m, n, v;
         socklen_t sinlen, sin2len, sll_len;
         short sll_hatype;
@@ -463,7 +507,7 @@ int main(int argc, char *argv[])
                 if (BPF != BPF_NONE) printf("BPF filters out " DESCRIBE_BPF);
 
 
-                     strncpy(ifr.ifr_name, iface, IF_NAMESIZE);
+                     strncpy(ifr.ifr_name, iface, IFNAMSIZ);
                 if (ioctl(s2, SIOCGIFINDEX, &ifr) == -1) PERROR("ioctl SIOCGIFINDEX");
                 ifidx = ifr.ifr_ifindex;
 
@@ -511,10 +555,12 @@ int main(int argc, char *argv[])
                                 if (ioctl(s, ifclone_get_ioctl[ireq], &ifr) == -1)
                                         PERROR2("ioctl get");
                                 send(s, &cmd, 2, 0);
-                                send(s, &req, 4, 0);
+                                netreq = htonl(req);
+                                send(s, &netreq, 4, 0);
                                 if ((req != SIOCSIFHWADDR) && (req != SIOCSIFMTU))
                                         ifr.ifr_addr.sa_family = AF_INET;
-                                send(s, (void *)&ifr, sizeof(struct ifreq), 0);
+                                hton_ifreq(req, &ifr, &nifr);
+                                send(s, (void *)&nifr, sizeof(struct netifreq), 0);
                         }
                 }
                 while (1) {
@@ -537,8 +583,10 @@ int main(int argc, char *argv[])
                                 if (n & CMD_CMD) { /* Command from the peer */
                                         switch (n & 0x7fff) {
                                         case CMD_IFREQ:
-                                                recv(s, &req, 4, 0);
-                                                recv(s, &ifr, sizeof(struct ifreq), 0);
+                                                recv(s, &netreq, 4, 0);
+                                                req = ntohl(netreq);
+                                                recv(s, &nifr, sizeof(struct netifreq), 0);
+                                                ntoh_ifreq(req, &nifr, &ifr);
                                                 if (CONFIG) {
                                                         strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
                                                         if (ioctl(s, req, &ifr) == -1)
