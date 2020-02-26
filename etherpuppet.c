@@ -63,6 +63,7 @@
 
 #define CMD_CMD 0x8000
 #define CMD_IFREQ 0x0001
+#define CMD_CONF_FINISHED 0x0002
 
 
 #define SETBPF(x,y,val) do { the_BPF[(x)].k = (val); the_BPF[(y)].k = (val); } while(0)
@@ -78,6 +79,8 @@
 #define GETBPFPORTDST GETBPF(10)
 
 #define QUAD(x) (((x) >> 24)&0xff),(((x) >> 16)&0xff),(((x) >> 8)&0xff),((x)&0xff)
+
+
 
 
 #define DESCRIBE_BPF "%i.%i.%i.%i:%i <-> %i.%i.%i.%i:%i\n", QUAD(GETBPFIPSRC),GETBPFPORTSRC,QUAD(GETBPFIPDST),GETBPFPORTDST
@@ -282,6 +285,7 @@ int main(int argc, char *argv[])
         int MASTER = 0, CONFIG = 1;
         int MODE = 0,  DEBUG = 0;
         int PPP = 0;
+        int UP_IFACE = 0;
 
         int BPF = BPF_AUTO;
 
@@ -291,7 +295,7 @@ int main(int argc, char *argv[])
         sigaddset(&sa.sa_mask, SIGINT);
         sa.sa_flags = SA_SIGINFO | SA_ONESHOT | SA_RESTART;
 
-        while ((c = getopt(argc, argv, "ms:c:i:I:hdBSMCv")) != -1) {
+        while ((c = getopt(argc, argv, "ms:c:i:I:hdBSMCvu")) != -1) {
                 switch (c) {
                 case 'v':
                         version();
@@ -334,6 +338,9 @@ int main(int argc, char *argv[])
                         break;
                 case 'I':
                         ifname_opt = optarg;
+                        break;
+                case 'u':
+                        UP_IFACE = 1;
                         break;
                 default:
                         usage();
@@ -562,6 +569,8 @@ int main(int argc, char *argv[])
                                 hton_ifreq(req, &ifr, &nifr);
                                 send(s, (void *)&nifr, sizeof(struct netifreq), 0);
                         }
+                        cmd = htons(CMD_CMD | CMD_CONF_FINISHED);
+                        send(s, &cmd, 2, 0);
                 }
                 while (1) {
                         FD_ZERO(&readset);
@@ -594,6 +603,16 @@ int main(int argc, char *argv[])
                                                 }
                                                 printf("Configure request [%04x] %s\n",
                                                        req, CONFIG ? "applied" : "ignored");
+                                                break;
+                                        case CMD_CONF_FINISHED:
+                                                if (UP_IFACE) {
+                                                        strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+                                                        if (ioctl(s, SIOCGIFFLAGS, &ifr) == -1)
+                                                                PERROR3("ioctl get flags");
+                                                        ifr.ifr_ifru.ifru_flags |= IFF_UP;
+                                                        if (ioctl(s, SIOCSIFFLAGS, &ifr) == -1)
+                                                                PERROR3("ioctl set flags");
+                                                }
                                                 break;
                                         default:
                                                 ERROR("unknown command\n");
