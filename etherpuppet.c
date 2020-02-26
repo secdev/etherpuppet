@@ -280,7 +280,7 @@ int main(int argc, char *argv[])
         int req;
 
         int MASTER = 0, CONFIG = 1;
-              int MODE = 0,  DEBUG = 0;
+        int MODE = 0,  DEBUG = 0;
         int PPP = 0;
 
         int BPF = BPF_AUTO;
