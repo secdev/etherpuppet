@@ -15,9 +15,6 @@
  */
 
 
-/* $Id$ */
-
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -45,9 +42,9 @@
 
 
 
-#define VERSION "v0.3"
+#define VERSION "v0.4"
 
-#define PROTOVERSION 0x13370103
+#define PROTOVERSION 0x13370104
 
 #define MTU 1600
 
