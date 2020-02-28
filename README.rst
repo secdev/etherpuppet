@@ -9,12 +9,12 @@ Etherpuppet is a small program for Linux that will create a virtual interface (T
 Detailed informations
 ---------------------
 
-Etherpuppet is a small program for Linux that will create a voodoo doll for an Ethernet interface. You have to run the Etherpuppet on your machine to create the doll, which will have the shape of a virtual TUN/TAP interface (named by default puppet%d, where %d is a number). You also have to run Etherpuppet on the victim interface's machine. Both instances of Etherpuppet will communicate through TCP. Once this is done, everything seen by the real interface will be seen by the virtual one. Everything that will be sent to the virtual interface will be emitted by the real one. Parameters like IP address or MTU are transmited once at the begining from the real interface to the virtual one. Following changes won't be transmitted in either way.
+Etherpuppet is a small program for Linux that will create a voodoo doll for an Ethernet interface. You have to run the Etherpuppet on your machine to create the doll, which will have the shape of a virtual TUN/TAP interface (named by default puppet%d, where %d is a number). You also have to run Etherpuppet on the victim interface's machine. Both instances of Etherpuppet will communicate through TCP. Once this is done, everything seen by the real interface will be seen by the virtual one. Everything that will be sent to the virtual interface will be emitted by the real one. Parameters like IP address or MTU are transmitted once at the beginning from the real interface to the virtual one. Following changes won't be transmitted in either way.
 
 Etherpuppet has been designed because one often has a small machine as his Internet gateway, and sometimes want to run some big applications that need a raw access to this interface, for sniffing (Ethereal, etc.) or for crafting packets that does not survive being reassembled, NATed, etc.
 A static MIPS binary is even provided that can run on a Linksys WRT54G (at least on mine with the OpenWRT firmware), so that you can run scapy directly from your Linksys' interface.
 
-* Warning: replicating your Internet firewall interface onto your LAN workstation is like pluging your workstation directly to Internet. Don't forget this point!
+* Warning: replicating your Internet firewall interface onto your LAN workstation is like plugging your workstation directly to Internet. Don't forget this point!
 * Warning: nothing is done to ensure authentication or confidentiality. If you want that, use SSH tunneling (see also ``-S``)
 
 .. sourcecode :: none
@@ -49,5 +49,4 @@ The source and destination are by default the TCP connection end points. If you 
 If you connect two Etherpuppet instances in master mode, you'll get a TCP tunnel through virtual interfaces.
 
 If you connect two Etherpuppet instances in slave mode, you may get some kind of inefficient distributed bridge, but more probably, you'll get a big mess.
-
 
