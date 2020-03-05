@@ -648,7 +648,7 @@ int main(int argc, char *argv[])
                                                 sll.sll_protocol = *(short *)(buf+2); /* htons(ntohs()) = Id */
                                                 if (DEBUG >= 3) printf("Protocol = %04x\n",ntohs(sll.sll_protocol));
                                                 sll.sll_ifindex = ifidx;
-                                                if (sendto(s2, buf+4, n+2, 0, (struct sockaddr *)&sll, sizeof(sll)) == -1) PERROR2("sendto");
+                                                if (sendto(s2, buf+4, n-2, 0, (struct sockaddr *)&sll, sizeof(sll)) == -1) PERROR2("sendto");
                                         }
                                 }
                         }
