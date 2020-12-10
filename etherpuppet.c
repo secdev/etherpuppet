@@ -119,7 +119,7 @@ enum {
 struct sock_filter the_BPF[]= {
 
         { 0x28,  0,  0, 0x0000000c }, // 00: ldh  [12]
-        { 0x15,  0, 14, 0x00000800 }, // 01: jeq  #0x800       jt 2    jf 27
+        { 0x15,  0, 25, 0x00000800 }, // 01: jeq  #0x800       jt 2    jf 27
         { 0x30,  0,  0, 0x00000017 }, // 02: ldb  [23]
         { 0x15,  0, 11, 0x00000006 }, // 03: jeq  #0x6         jt 4    jf 15
         { 0x20,  0,  0, 0x0000001e }, // 04: ld   [30]
@@ -298,7 +298,7 @@ int main(int argc, char *argv[])
         sigaddset(&sa.sa_mask, SIGINT);
         sa.sa_flags = SA_SIGINFO | SA_ONESHOT | SA_RESTART;
 
-        while ((c = getopt(argc, argv, "ms:c:i:I:hdBSMCvuU:")) != -1) {
+        while ((c = getopt(argc, argv, "ms:c:i:I:hdBSM:CvuU:")) != -1) {
                 switch (c) {
                 case 'v':
                         version();
