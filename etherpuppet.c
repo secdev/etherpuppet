@@ -298,7 +298,7 @@ int main(int argc, char *argv[])
         sigaddset(&sa.sa_mask, SIGINT);
         sa.sa_flags = SA_SIGINFO | SA_ONESHOT | SA_RESTART;
 
-        while ((c = getopt(argc, argv, "ms:c:i:I:hdBSMCvuU:")) != -1) {
+        while ((c = getopt(argc, argv, "ms:c:i:I:hdBSM:CvuU:")) != -1) {
                 switch (c) {
                 case 'v':
                         version();
